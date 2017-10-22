@@ -137,7 +137,7 @@ void loop(){
     else if(commands[3]==8)
     {
       gripper.write(gripper_pos);
-      gripper_pos = constrain(gripper_pos + 1, 0, 180);
+      gripper_pos = constrain(gripper_pos - 1, 0, 180);
       Serial.print("\tGpos: " + String(gripper_pos));
     }
 
