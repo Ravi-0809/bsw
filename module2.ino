@@ -1,10 +1,25 @@
 #include <SPI.h>
+#include <MFRC522.h>
 #include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
 #include <Servo.h>
 
 #define SS_PIN D4
 #define RST_PIN D3
+ 
+// whether to store key after scan or clear it
+#define STORE_KEY_AFTER_SCAN true
+
+//MFRC Class Instance
+MFRC522 rfid(SS_PIN, RST_PIN);
+
+//create a variable for key
+MFRC522::MIFARE_Key key; 
+String checker="FFFFFFFF";
+//4 bytes to store new NUID 
+byte nuidPICC[4];
+//remains Global, updates on each successfull call of scan()
+String hexKey = "FFFFFFFF";
 
 byte commands[4]={0,0,0,0};
 
@@ -12,6 +27,10 @@ int lmotor1 = D1;
 int lmotor2 = D2;
 int rmotor1 = D8;
 int rmotor2 = D6;
+
+Servo gripper;
+
+int gripper_pos=0;  //180
 
 int NEUTRAL = 1000;
 int LEFT = 999;
@@ -36,14 +55,10 @@ void setup()
   analogWrite(rmotor2, 0); 
   
   SPI.begin();
+  rfid.PCD_Init();
   Serial.begin(9600);
   delay(1000);
   Serial.println("Serial Initialized");
-
-  // positon gripper
-  //pinMode(D0, OUTPUT);
-  //gripper.attach(D0);
-  //gripper.write(100);
 }
 
 void loop(){
@@ -71,6 +86,19 @@ void loop(){
 //  Serial.print(" 3 ");
 //  Serial.println(commands[3]);
 
+    if(commands[3] == 4)
+    {
+      scan();
+      if(checker != hexKey)
+      {
+        checker = hexKey;
+        Serial.print("\n-------\n");
+        Serial.print(hexKey);
+        Serial.print("\n-------\n");
+        //delay(500);
+      }
+    }
+
     int movDir = MOV_NEUTRAL, turnDir = NEUTRAL, scaledTurnSpeed = 0, scaledSpeed = 0;
     int recSpeed = commands[1];
     scaledSpeed = map(recSpeed, 0, 255, 0, 1023);
@@ -96,6 +124,15 @@ void loop(){
     else if(commands[0] == 243){
       movDir = MOV_NEUTRAL;
     }
+    /*
+    Serial.print(movDir);
+    Serial.print("\t");
+    Serial.print(scaledSpeed);
+    Serial.print("\t");
+    Serial.print(turnDir);
+    Serial.print("\t");
+    Serial.println(scaledTurnSpeed);
+    */
     leftWheel(movDir, scaledSpeed, turnDir, scaledTurnSpeed);
     rightWheel(movDir, scaledSpeed, turnDir, scaledTurnSpeed);
   }
@@ -188,3 +225,62 @@ void rightWheel(int mov_dir, int scaledSpeed, int turn_dir, int scaledTurn){
     }
   }
 }
+
+/*
+--------------------------------------
+MFRC SCANNING
+--------------------------------------
+*/
+void scan()
+{
+  SPI.begin();
+  rfid.PCD_Init();
+  //clear variable on every call of scan
+  if(!STORE_KEY_AFTER_SCAN)
+    hexKey = "";
+  // Look for new cards and verify that the card has been read already
+  if ( ! rfid.PICC_IsNewCardPresent())
+    return;
+  if ( ! rfid.PICC_ReadCardSerial())
+    return;
+
+ MFRC522::PICC_Type piccType = rfid.PICC_GetType(rfid.uid.sak);
+  // Check type of PICC
+  if (piccType != MFRC522::PICC_TYPE_MIFARE_MINI &&  
+    piccType != MFRC522::PICC_TYPE_MIFARE_1K &&
+    piccType != MFRC522::PICC_TYPE_MIFARE_4K){
+      hexKey = "FFFFFFFF";
+      return;
+  }
+
+  // update variable only on new scan
+  if(STORE_KEY_AFTER_SCAN)
+    hexKey = "";
+
+  //store NUID
+  for (byte i = 0; i < 4; i++)
+    nuidPICC[i] = rfid.uid.uidByte[i];
+
+  createHex(nuidPICC, sizeof(nuidPICC));
+  
+  // Halt PICC
+  rfid.PICC_HaltA();
+  // Stop encryption on PCD
+  rfid.PCD_StopCrypto1();
+}
+
+// Generate Hex key from Binary dump
+void createHex(byte *buffer, byte bufferSize)
+{
+  // An eight character string is stored in hexKey
+  for (byte i = 0; i < bufferSize; i++)
+  { 
+    hexKey += (buffer[i] < 0x10 ? "0" : "");
+    hexKey += String(buffer[i], HEX);
+  }
+}
+/*
+--------------------------------------
+MFRC SCANNING
+--------------------------------------
+*/
